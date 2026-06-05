@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session, select
-from models import Task, TaskCreate
+from models import Task
 from db import get_session
 from auth import verify_token
 from pydantic import BaseModel
@@ -14,13 +14,16 @@ from datetime import datetime
 load_dotenv()
 
 router = APIRouter(prefix="/api", tags=["chat"])
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
+)
 
 class ChatRequest(BaseModel):
     message: str
     user_id: str
 
-# --- Define OpenAI Functions (MCP Tools) ---
+# --- Define Functions (MCP Tools) ---
 functions = [
     {
         "name": "create_task",
@@ -85,7 +88,7 @@ functions = [
     }
 ]
 
-# --- Execute the function OpenAI wants to call ---
+# --- Execute the function ---
 def execute_function(name: str, args: dict, user_id: str, session: Session):
     if name == "create_task":
         task = Task(
@@ -175,9 +178,8 @@ def chat(
         }
     ]
 
-    # First call to OpenAI
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="llama-3.3-70b-versatile",
         messages=messages,
         functions=functions,
         function_call="auto"
@@ -185,15 +187,12 @@ def chat(
 
     response_message = response.choices[0].message
 
-    # Check if OpenAI wants to call a function
     if response_message.function_call:
         func_name = response_message.function_call.name
         func_args = json.loads(response_message.function_call.arguments)
 
-        # Execute the function
         func_result = execute_function(func_name, func_args, authenticated_user_id, session)
 
-        # Send result back to OpenAI for final response
         messages.append({
             "role": "assistant",
             "content": None,
@@ -209,7 +208,7 @@ def chat(
         })
 
         final_response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+           model="llama-3.3-70b-versatile",
             messages=messages
         )
 
@@ -218,7 +217,6 @@ def chat(
             "action_taken": func_name
         }
 
-    # No function call — just a regular reply
     return {
         "reply": response_message.content,
         "action_taken": None
